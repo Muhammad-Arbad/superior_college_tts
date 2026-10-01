@@ -10,14 +10,64 @@ import 'package:url_launcher/url_launcher.dart';
 
 const kHomeUrl = 'https://portal.superiortts.com/mycollege/index.php';
 const kHost = 'portal.superiortts.com';
-const kBrand = Color(0xFF266D68);
+const kBrand = Color(0xFF3A89B6);
+const kNavBar = Color(0xFF2C6A8E); // slightly darker shade for bottom nav
+const kDrawerBg = Color(0xFF303030);
+const _p = 'https://portal.superiortts.com/mycollege/student-panel';
+
+class NavItem {
+  const NavItem(this.label, this.icon, this.url);
+  final String label;
+  final IconData icon;
+  final String url;
+}
+
+const kDrawerItems = [
+  NavItem('Dashboard', Icons.dashboard, kHomeUrl),
+  NavItem(
+    'Attendance',
+    Icons.calendar_today_outlined,
+    '$_p/attendance-detail-month-wise.php',
+  ),
+  NavItem(
+    'Fee Collections',
+    Icons.confirmation_number,
+    '$_p/fee-collection.php',
+  ),
+  NavItem(
+    'Examinations',
+    Icons.fact_check,
+    '$_p/internal-examination-summary.php',
+  ),
+  NavItem('Date sheet', Icons.menu_book, '$_p/date-sheet.php'),
+  NavItem('Profile', Icons.person, '$_p/change-your-profile-settings.php'),
+  NavItem('Events', Icons.notification_add, '$_p/events-detail.php'),
+  NavItem('SMS Inbox', Icons.sms, '$_p/sms-detail.php'),
+];
+
+const kBottomItems = [
+  NavItem('Home', Icons.dashboard, kHomeUrl),
+  NavItem('Attendance', Icons.event_available, '$_p/attendance-calendar.php'),
+  NavItem('Fees', Icons.receipt_long, '$_p/fee-plan.php'),
+  NavItem(
+    'Examination',
+    Icons.fact_check,
+    '$_p/internal-examination-summary.php',
+  ),
+  NavItem('SMS', Icons.sms, '$_p/sms-detail.php'),
+];
+
+const kProfileUrl = '$_p/change-your-profile-settings.php';
+const kPasswordUrl = '$_p/change-your-password.php';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
-    statusBarColor: kBrand,
-    statusBarIconBrightness: Brightness.light,
-  ));
+  SystemChrome.setSystemUIOverlayStyle(
+    const SystemUiOverlayStyle(
+      statusBarColor: kBrand,
+      statusBarIconBrightness: Brightness.light,
+    ),
+  );
   runApp(const PortalApp());
 }
 
@@ -48,6 +98,8 @@ class _PortalPageState extends State<PortalPage> {
   double _progress = 0;
   bool _offline = false;
   bool _showSplash = true;
+  String _currentUrl = kHomeUrl;
+  final _scaffoldKey = GlobalKey<ScaffoldState>();
   DateTime? _lastBack;
 
   @override
@@ -85,10 +137,15 @@ class _PortalPageState extends State<PortalPage> {
     final messenger = ScaffoldMessenger.of(context);
     messenger.showSnackBar(const SnackBar(content: Text('Downloading...')));
     try {
-      final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
+      final cookies = await CookieManager.instance().getCookies(
+        url: WebUri(url),
+      );
       final client = HttpClient();
       final req = await client.getUrl(Uri.parse(url));
-      req.headers.set('Cookie', cookies.map((c) => '${c.name}=${c.value}').join('; '));
+      req.headers.set(
+        'Cookie',
+        cookies.map((c) => '${c.name}=${c.value}').join('; '),
+      );
       final res = await req.close();
       if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
 
@@ -118,7 +175,26 @@ class _PortalPageState extends State<PortalPage> {
     }
   }
 
+  void _open(String url) {
+    _scaffoldKey.currentState?.closeDrawer();
+    setState(() {
+      _offline = false;
+      _currentUrl = url;
+    });
+    _web?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
+  }
+
+  // Bottom tab matching the current page (-1 = none)
+  int get _bottomIndex {
+    final path = Uri.tryParse(_currentUrl)?.path ?? '';
+    return kBottomItems.indexWhere((i) => Uri.parse(i.url).path == path);
+  }
+
   Future<void> _onBack() async {
+    if (_scaffoldKey.currentState?.isDrawerOpen ?? false) {
+      _scaffoldKey.currentState!.closeDrawer();
+      return;
+    }
     if (_offline) {
       SystemNavigator.pop();
       return;
@@ -129,11 +205,15 @@ class _PortalPageState extends State<PortalPage> {
     }
     // Double back to exit
     final now = DateTime.now();
-    if (_lastBack == null || now.difference(_lastBack!) > const Duration(seconds: 2)) {
+    if (_lastBack == null ||
+        now.difference(_lastBack!) > const Duration(seconds: 2)) {
       _lastBack = now;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Press back again to exit'), duration: Duration(seconds: 2)),
+        const SnackBar(
+          content: Text('Press back again to exit'),
+          duration: Duration(seconds: 2),
+        ),
       );
       return;
     }
@@ -152,67 +232,255 @@ class _PortalPageState extends State<PortalPage> {
       onPopInvokedWithResult: (didPop, _) {
         if (!didPop) _onBack();
       },
-      child: Scaffold(
-        backgroundColor: Colors.white,
-        body: SafeArea(
-          child: Stack(
-            children: [
-              InAppWebView(
-                initialUrlRequest: URLRequest(url: WebUri(kHomeUrl)),
-                pullToRefreshController: _ptr,
-                initialSettings: InAppWebViewSettings(
-                  javaScriptEnabled: true,
-                  domStorageEnabled: true,
-                  useShouldOverrideUrlLoading: true,
-                  useOnDownloadStart: true,
-                  supportMultipleWindows: true,
-                  javaScriptCanOpenWindowsAutomatically: true,
-                  mediaPlaybackRequiresUserGesture: false,
-                  allowFileAccess: true,
-                  supportZoom: false,
-                ),
-                onWebViewCreated: (c) => _web = c,
-                shouldOverrideUrlLoading: (c, action) => _onNavigate(action.request.url),
-                // target="_blank" links open in the same view
-                onCreateWindow: (c, action) async {
-                  final url = action.request.url;
-                  if (url != null) {
-                    final policy = await _onNavigate(url);
-                    if (policy == NavigationActionPolicy.ALLOW) {
-                      c.loadUrl(urlRequest: URLRequest(url: url));
-                    }
-                  }
-                  return false;
-                },
-                onDownloadStarting: (c, req) async {
-                  _download(req.url.toString(), req.suggestedFilename);
-                  return null;
-                },
-                onPermissionRequest: (c, req) async {
-                  if (req.resources.contains(PermissionResourceType.CAMERA)) {
-                    await Permission.camera.request();
-                  }
-                  return PermissionResponse(
-                    resources: req.resources,
-                    action: PermissionResponseAction.GRANT,
-                  );
-                },
-                onProgressChanged: (c, p) {
-                  if (p == 100) _ptr.endRefreshing();
-                  setState(() => _progress = p / 100);
-                },
-                onLoadStop: (c, url) => _ptr.endRefreshing(),
-                onReceivedError: (c, req, err) {
-                  _ptr.endRefreshing();
-                  if (req.isForMainFrame ?? false) setState(() => _offline = true);
-                },
+      child: Stack(
+        children: [
+          Scaffold(
+            key: _scaffoldKey,
+            backgroundColor: Colors.white,
+            appBar: AppBar(
+              backgroundColor: kBrand,
+              foregroundColor: Colors.white,
+              title: const Text(
+                'Superior College T.T.S',
+                style: TextStyle(fontWeight: FontWeight.w600),
               ),
-              if (_progress < 1 && !_offline)
-                LinearProgressIndicator(value: _progress, color: kBrand, minHeight: 3),
-              if (_offline) _OfflineView(onRetry: _retry),
-              // Portal loads behind the splash, so it's ready when splash ends
-              if (_showSplash)
-                _AnimatedSplash(onDone: () => setState(() => _showSplash = false)),
+              actions: [
+                PopupMenuButton<String>(
+                  color: kDrawerBg,
+                  onSelected: (v) {
+                    if (v == 'exit') {
+                      SystemNavigator.pop();
+                    } else {
+                      _open(v);
+                    }
+                  },
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(
+                      value: kProfileUrl,
+                      child: _MenuText('My Profile'),
+                    ),
+                    PopupMenuItem(
+                      value: kPasswordUrl,
+                      child: _MenuText('Change Password'),
+                    ),
+                    PopupMenuItem(value: 'exit', child: _MenuText('Exit')),
+                  ],
+                ),
+              ],
+            ),
+            drawer: _AppDrawer(onTap: _open),
+            bottomNavigationBar: _BottomBar(
+              selected: _bottomIndex,
+              onTap: (i) => _open(kBottomItems[i].url),
+            ),
+            body: Stack(
+              children: [
+                InAppWebView(
+                  initialUrlRequest: URLRequest(url: WebUri(kHomeUrl)),
+                  pullToRefreshController: _ptr,
+                  initialSettings: InAppWebViewSettings(
+                    javaScriptEnabled: true,
+                    domStorageEnabled: true,
+                    useShouldOverrideUrlLoading: true,
+                    useOnDownloadStart: true,
+                    supportMultipleWindows: true,
+                    javaScriptCanOpenWindowsAutomatically: true,
+                    mediaPlaybackRequiresUserGesture: false,
+                    allowFileAccess: true,
+                    supportZoom: false,
+                  ),
+                  onWebViewCreated: (c) => _web = c,
+                  onUpdateVisitedHistory: (c, url, _) {
+                    if (url != null) {
+                      setState(() => _currentUrl = url.toString());
+                    }
+                  },
+                  shouldOverrideUrlLoading: (c, action) =>
+                      _onNavigate(action.request.url),
+                  // target="_blank" links open in the same view
+                  onCreateWindow: (c, action) async {
+                    final url = action.request.url;
+                    if (url != null) {
+                      final policy = await _onNavigate(url);
+                      if (policy == NavigationActionPolicy.ALLOW) {
+                        c.loadUrl(urlRequest: URLRequest(url: url));
+                      }
+                    }
+                    return false;
+                  },
+                  onDownloadStarting: (c, req) async {
+                    _download(req.url.toString(), req.suggestedFilename);
+                    return null;
+                  },
+                  onPermissionRequest: (c, req) async {
+                    if (req.resources.contains(PermissionResourceType.CAMERA)) {
+                      await Permission.camera.request();
+                    }
+                    return PermissionResponse(
+                      resources: req.resources,
+                      action: PermissionResponseAction.GRANT,
+                    );
+                  },
+                  onProgressChanged: (c, p) {
+                    if (p == 100) _ptr.endRefreshing();
+                    setState(() => _progress = p / 100);
+                  },
+                  onLoadStop: (c, url) => _ptr.endRefreshing(),
+                  onReceivedError: (c, req, err) {
+                    _ptr.endRefreshing();
+                    if (req.isForMainFrame ?? false) {
+                      setState(() => _offline = true);
+                    }
+                  },
+                ),
+                if (_progress < 1 && !_offline)
+                  LinearProgressIndicator(
+                    value: _progress,
+                    color: kBrand,
+                    minHeight: 3,
+                  ),
+                if (_offline) _OfflineView(onRetry: _retry),
+              ],
+            ),
+          ),
+          // Splash covers app bar + nav too; portal loads behind it
+          if (_showSplash)
+            _AnimatedSplash(onDone: () => setState(() => _showSplash = false)),
+        ],
+      ),
+    );
+  }
+}
+
+class _MenuText extends StatelessWidget {
+  const _MenuText(this.text);
+  final String text;
+
+  @override
+  Widget build(BuildContext context) =>
+      Text(text, style: const TextStyle(color: Colors.white, fontSize: 16));
+}
+
+class _AppDrawer extends StatelessWidget {
+  const _AppDrawer({required this.onTap});
+  final ValueChanged<String> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Drawer(
+      backgroundColor: kDrawerBg,
+      shape: const RoundedRectangleBorder(),
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            color: kBrand,
+            padding: EdgeInsets.fromLTRB(
+              24,
+              MediaQuery.of(context).padding.top + 24,
+              24,
+              24,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Image.asset('assets/logo.png', width: 84, height: 84),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Superior College T.T.S',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              children: [
+                for (final item in kDrawerItems)
+                  ListTile(
+                    leading: Icon(item.icon, color: Colors.white70),
+                    title: Text(
+                      item.label,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 2,
+                    ),
+                    onTap: () => onTap(item.url),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BottomBar extends StatelessWidget {
+  const _BottomBar({required this.selected, required this.onTap});
+  final int selected;
+  final ValueChanged<int> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: kNavBar,
+      child: SafeArea(
+        top: false,
+        child: SizedBox(
+          height: 64,
+          child: Row(
+            children: [
+              for (var i = 0; i < kBottomItems.length; i++)
+                Expanded(
+                  child: InkWell(
+                    onTap: () => onTap(i),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          kBottomItems[i].icon,
+                          color: i == selected
+                              ? Colors.white
+                              : const Color(0xFFB9DDF2),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          kBottomItems[i].label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: i == selected
+                                ? Colors.white
+                                : const Color(0xFFB9DDF2),
+                            fontWeight: i == selected
+                                ? FontWeight.w700
+                                : FontWeight.w400,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
@@ -230,7 +498,8 @@ class _AnimatedSplash extends StatefulWidget {
   State<_AnimatedSplash> createState() => _AnimatedSplashState();
 }
 
-class _AnimatedSplashState extends State<_AnimatedSplash> with TickerProviderStateMixin {
+class _AnimatedSplashState extends State<_AnimatedSplash>
+    with TickerProviderStateMixin {
   late final AnimationController _slide = AnimationController(
     vsync: this,
     duration: const Duration(seconds: 2),
@@ -239,8 +508,10 @@ class _AnimatedSplashState extends State<_AnimatedSplash> with TickerProviderSta
     vsync: this,
     duration: const Duration(milliseconds: 400),
   );
-  late final Animation<double> _curve =
-      CurvedAnimation(parent: _slide, curve: Curves.easeInOutCubic);
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _slide,
+    curve: Curves.easeInOutCubic,
+  );
 
   @override
   void initState() {
@@ -302,11 +573,16 @@ class _OfflineView extends StatelessWidget {
           const SizedBox(height: 24),
           const Icon(Icons.wifi_off_rounded, size: 48, color: Colors.grey),
           const SizedBox(height: 12),
-          const Text('No internet connection',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const Text(
+            'No internet connection',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
           const SizedBox(height: 6),
-          const Text('Please check your connection and try again.',
-              textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          const Text(
+            'Please check your connection and try again.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
           const SizedBox(height: 24),
           FilledButton.icon(
             onPressed: onRetry,
