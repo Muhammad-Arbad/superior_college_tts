@@ -1,121 +1,250 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_inappwebview/flutter_inappwebview.dart';
+import 'package:open_filex/open_filex.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:url_launcher/url_launcher.dart';
+
+const kHomeUrl = 'https://portal.superiortts.com/mycollege/index.php';
+const kHost = 'portal.superiortts.com';
+const kBrand = Color(0xFF266D68);
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: kBrand,
+    statusBarIconBrightness: Brightness.light,
+  ));
+  runApp(const PortalApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class PortalApp extends StatelessWidget {
+  const PortalApp({super.key});
 
-  // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flutter Demo',
-      theme: ThemeData(
-        // This is the theme of your application.
-        //
-        // TRY THIS: Try running your application with "flutter run". You'll see
-        // the application has a purple toolbar. Then, without quitting the app,
-        // try changing the seedColor in the colorScheme below to Colors.green
-        // and then invoke "hot reload" (save your changes or press the "hot
-        // reload" button in a Flutter-supported IDE, or press "r" if you used
-        // the command line to start the app).
-        //
-        // Notice that the counter didn't reset back to zero; the application
-        // state is not lost during the reload. To reset the state, use hot
-        // restart instead.
-        //
-        // This works for code too, not just values: Most code changes can be
-        // tested with just a hot reload.
-        colorScheme: .fromSeed(seedColor: Colors.deepPurple),
-      ),
-      home: const MyHomePage(title: 'Flutter Demo Home Page'),
+      title: 'SUPERIOR COLLEGE T.T.S',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(colorSchemeSeed: kBrand, useMaterial3: true),
+      home: const PortalPage(),
     );
   }
 }
 
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key, required this.title});
-
-  // This widget is the home page of your application. It is stateful, meaning
-  // that it has a State object (defined below) that contains fields that affect
-  // how it looks.
-
-  // This class is the configuration for the state. It holds the values (in this
-  // case the title) provided by the parent (in this case the App widget) and
-  // used by the build method of the State. Fields in a Widget subclass are
-  // always marked "final".
-
-  final String title;
+class PortalPage extends StatefulWidget {
+  const PortalPage({super.key});
 
   @override
-  State<MyHomePage> createState() => _MyHomePageState();
+  State<PortalPage> createState() => _PortalPageState();
 }
 
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+class _PortalPageState extends State<PortalPage> {
+  InAppWebViewController? _web;
+  late final PullToRefreshController _ptr;
+  double _progress = 0;
+  bool _offline = false;
+  DateTime? _lastBack;
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  @override
+  void initState() {
+    super.initState();
+    _ptr = PullToRefreshController(
+      settings: PullToRefreshSettings(color: kBrand),
+      onRefresh: () async => _web?.reload(),
+    );
+  }
+
+  // Anything outside the portal domain opens outside the app
+  bool _isInternal(Uri uri) =>
+      (uri.scheme == 'https' || uri.scheme == 'http') && uri.host == kHost;
+
+  Future<NavigationActionPolicy> _onNavigate(Uri? uri) async {
+    if (uri == null) return NavigationActionPolicy.ALLOW;
+    if (uri.scheme == 'about' || uri.scheme == 'data' || uri.scheme == 'blob') {
+      return NavigationActionPolicy.ALLOW;
+    }
+    if (_isInternal(uri)) {
+      // WebView can't render PDFs inline, so download + open them
+      if (uri.path.toLowerCase().endsWith('.pdf')) {
+        _download(uri.toString(), null);
+        return NavigationActionPolicy.CANCEL;
+      }
+      return NavigationActionPolicy.ALLOW;
+    }
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+    return NavigationActionPolicy.CANCEL;
+  }
+
+  // Downloads with the webview's session cookies so logged-in files work
+  Future<void> _download(String url, String? suggestedName) async {
+    final messenger = ScaffoldMessenger.of(context);
+    messenger.showSnackBar(const SnackBar(content: Text('Downloading...')));
+    try {
+      final cookies = await CookieManager.instance().getCookies(url: WebUri(url));
+      final client = HttpClient();
+      final req = await client.getUrl(Uri.parse(url));
+      req.headers.set('Cookie', cookies.map((c) => '${c.name}=${c.value}').join('; '));
+      final res = await req.close();
+      if (res.statusCode != 200) throw 'HTTP ${res.statusCode}';
+
+      var name = suggestedName;
+      final cd = res.headers.value('content-disposition');
+      if ((name == null || name.isEmpty) && cd != null) {
+        final m = RegExp(r'filename="?([^";]+)"?').firstMatch(cd);
+        name = m?.group(1);
+      }
+      if (name == null || name.isEmpty) {
+        final seg = Uri.parse(url).pathSegments;
+        name = seg.isNotEmpty && seg.last.contains('.')
+            ? seg.last
+            : 'file_${DateTime.now().millisecondsSinceEpoch}';
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/$name');
+      await res.pipe(file.openWrite());
+      client.close();
+
+      messenger.hideCurrentSnackBar();
+      await OpenFilex.open(file.path);
+    } catch (e) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
+  Future<void> _onBack() async {
+    if (_offline) {
+      SystemNavigator.pop();
+      return;
+    }
+    if (await _web?.canGoBack() ?? false) {
+      await _web!.goBack();
+      return;
+    }
+    // Double back to exit
+    final now = DateTime.now();
+    if (_lastBack == null || now.difference(_lastBack!) > const Duration(seconds: 2)) {
+      _lastBack = now;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Press back again to exit'), duration: Duration(seconds: 2)),
+      );
+      return;
+    }
+    SystemNavigator.pop();
+  }
+
+  void _retry() {
+    setState(() => _offline = false);
+    _web?.reload();
   }
 
   @override
   Widget build(BuildContext context) {
-    // This method is rerun every time setState is called, for instance as done
-    // by the _incrementCounter method above.
-    //
-    // The Flutter framework has been optimized to make rerunning build methods
-    // fast, so that you can just rebuild anything that needs updating rather
-    // than having to individually change instances of widgets.
-    return Scaffold(
-      appBar: AppBar(
-        // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
-        // change color while the other colors stay the same.
-        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
-        // Here we take the value from the MyHomePage object that was created by
-        // the App.build method, and use it to set our appbar title.
-        title: Text(widget.title),
-      ),
-      body: Center(
-        // Center is a layout widget. It takes a single child and positions it
-        // in the middle of the parent.
-        child: Column(
-          // Column is also a layout widget. It takes a list of children and
-          // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
-          //
-          // Column has various properties to control how it sizes itself and
-          // how it positions its children. Here we use mainAxisAlignment to
-          // center the children vertically; the main axis here is the vertical
-          // axis because Columns are vertical (the cross axis would be
-          // horizontal).
-          //
-          // TRY THIS: Invoke "debug painting" (choose the "Toggle Debug Paint"
-          // action in the IDE, or press "p" in the console), to see the
-          // wireframe for each widget.
-          mainAxisAlignment: .center,
-          children: [
-            const Text('You have pushed the button this many times:'),
-            Text(
-              '$_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _onBack();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.white,
+        body: SafeArea(
+          child: Stack(
+            children: [
+              InAppWebView(
+                initialUrlRequest: URLRequest(url: WebUri(kHomeUrl)),
+                pullToRefreshController: _ptr,
+                initialSettings: InAppWebViewSettings(
+                  javaScriptEnabled: true,
+                  domStorageEnabled: true,
+                  useShouldOverrideUrlLoading: true,
+                  useOnDownloadStart: true,
+                  supportMultipleWindows: true,
+                  javaScriptCanOpenWindowsAutomatically: true,
+                  mediaPlaybackRequiresUserGesture: false,
+                  allowFileAccess: true,
+                  supportZoom: false,
+                ),
+                onWebViewCreated: (c) => _web = c,
+                shouldOverrideUrlLoading: (c, action) => _onNavigate(action.request.url),
+                // target="_blank" links open in the same view
+                onCreateWindow: (c, action) async {
+                  final url = action.request.url;
+                  if (url != null) {
+                    final policy = await _onNavigate(url);
+                    if (policy == NavigationActionPolicy.ALLOW) {
+                      c.loadUrl(urlRequest: URLRequest(url: url));
+                    }
+                  }
+                  return false;
+                },
+                onDownloadStartRequest: (c, req) =>
+                    _download(req.url.toString(), req.suggestedFilename),
+                onPermissionRequest: (c, req) async {
+                  if (req.resources.contains(PermissionResourceType.CAMERA)) {
+                    await Permission.camera.request();
+                  }
+                  return PermissionResponse(
+                    resources: req.resources,
+                    action: PermissionResponseAction.GRANT,
+                  );
+                },
+                onProgressChanged: (c, p) {
+                  if (p == 100) _ptr.endRefreshing();
+                  setState(() => _progress = p / 100);
+                },
+                onLoadStop: (c, url) => _ptr.endRefreshing(),
+                onReceivedError: (c, req, err) {
+                  _ptr.endRefreshing();
+                  if (req.isForMainFrame ?? false) setState(() => _offline = true);
+                },
+              ),
+              if (_progress < 1 && !_offline)
+                LinearProgressIndicator(value: _progress, color: kBrand, minHeight: 3),
+              if (_offline) _OfflineView(onRetry: _retry),
+            ],
+          ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
+    );
+  }
+}
+
+class _OfflineView extends StatelessWidget {
+  const _OfflineView({required this.onRetry});
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Image.asset('assets/logo.png', width: 120),
+          const SizedBox(height: 24),
+          const Icon(Icons.wifi_off_rounded, size: 48, color: Colors.grey),
+          const SizedBox(height: 12),
+          const Text('No internet connection',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 6),
+          const Text('Please check your connection and try again.',
+              textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 24),
+          FilledButton.icon(
+            onPressed: onRetry,
+            style: FilledButton.styleFrom(backgroundColor: kBrand),
+            icon: const Icon(Icons.refresh),
+            label: const Text('Retry'),
+          ),
+        ],
       ),
     );
   }
