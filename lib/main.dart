@@ -96,6 +96,7 @@ class _PortalPageState extends State<PortalPage> {
   InAppWebViewController? _web;
   late final PullToRefreshController _ptr;
   double _progress = 0;
+  bool _pulling = false; // pull-to-refresh has its own spinner
   bool _offline = false;
   bool _showSplash = true;
   String _currentUrl = kHomeUrl;
@@ -107,7 +108,10 @@ class _PortalPageState extends State<PortalPage> {
     super.initState();
     _ptr = PullToRefreshController(
       settings: PullToRefreshSettings(color: kBrand),
-      onRefresh: () async => _web?.reload(),
+      onRefresh: () async {
+        _pulling = true;
+        await _web?.reload();
+      },
     );
   }
 
@@ -330,7 +334,10 @@ class _PortalPageState extends State<PortalPage> {
                     );
                   },
                   onProgressChanged: (c, p) {
-                    if (p == 100) _ptr.endRefreshing();
+                    if (p == 100) {
+                      _ptr.endRefreshing();
+                      _pulling = false;
+                    }
                     setState(() => _progress = p / 100);
                   },
                   onLoadStop: (c, url) => _ptr.endRefreshing(),
@@ -341,11 +348,14 @@ class _PortalPageState extends State<PortalPage> {
                     }
                   },
                 ),
-                if (_progress < 1 && !_offline)
-                  LinearProgressIndicator(
-                    value: _progress,
-                    color: kBrand,
-                    minHeight: 3,
+                // Loader on every page change (skipped during pull-to-refresh)
+                if (_progress < 1 && !_offline && !_showSplash && !_pulling)
+                  Positioned.fill(
+                    child: Container(
+                      color: Colors.white.withValues(alpha: 0.6),
+                      alignment: Alignment.center,
+                      child: const CircularProgressIndicator(color: kBrand),
+                    ),
                   ),
                 if (_offline) _OfflineView(onRetry: _retry),
               ],
@@ -392,14 +402,7 @@ class _AppDrawer extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(4),
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Image.asset('assets/logo.png', width: 84, height: 84),
-                ),
+                Image.asset('assets/logo_round.png', width: 92, height: 92),
                 const SizedBox(height: 16),
                 const Text(
                   'Superior College T.T.S',
