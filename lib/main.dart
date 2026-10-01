@@ -47,6 +47,7 @@ class _PortalPageState extends State<PortalPage> {
   late final PullToRefreshController _ptr;
   double _progress = 0;
   bool _offline = false;
+  bool _showSplash = true;
   DateTime? _lastBack;
 
   @override
@@ -209,8 +210,75 @@ class _PortalPageState extends State<PortalPage> {
               if (_progress < 1 && !_offline)
                 LinearProgressIndicator(value: _progress, color: kBrand, minHeight: 3),
               if (_offline) _OfflineView(onRetry: _retry),
+              // Portal loads behind the splash, so it's ready when splash ends
+              if (_showSplash)
+                _AnimatedSplash(onDone: () => setState(() => _showSplash = false)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// Logo slides up from below to the center (same feel as EAP Plus), then fades out
+class _AnimatedSplash extends StatefulWidget {
+  const _AnimatedSplash({required this.onDone});
+  final VoidCallback onDone;
+
+  @override
+  State<_AnimatedSplash> createState() => _AnimatedSplashState();
+}
+
+class _AnimatedSplashState extends State<_AnimatedSplash> with TickerProviderStateMixin {
+  late final AnimationController _slide = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 2),
+  );
+  late final AnimationController _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 400),
+  );
+  late final Animation<double> _curve =
+      CurvedAnimation(parent: _slide, curve: Curves.easeInOutCubic);
+
+  @override
+  void initState() {
+    super.initState();
+    _run();
+  }
+
+  Future<void> _run() async {
+    await _slide.forward();
+    await Future.delayed(const Duration(milliseconds: 500));
+    if (!mounted) return;
+    await _fade.forward();
+    widget.onDone();
+  }
+
+  @override
+  void dispose() {
+    _slide.dispose();
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    return FadeTransition(
+      opacity: Tween<double>(begin: 1, end: 0).animate(_fade),
+      child: Container(
+        color: Colors.white,
+        alignment: Alignment.center,
+        child: AnimatedBuilder(
+          animation: _curve,
+          builder: (context, child) => Transform.translate(
+            // Starts near the bottom edge, ends at center
+            offset: Offset(0, (1 - _curve.value) * size.height * 0.45),
+            child: Opacity(opacity: _curve.value.clamp(0.0, 1.0), child: child),
+          ),
+          child: Image.asset('assets/logo.png', width: size.width * 0.45),
         ),
       ),
     );
