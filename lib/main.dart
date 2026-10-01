@@ -183,8 +183,10 @@ class _PortalPageState extends State<PortalPage> {
                   }
                   return false;
                 },
-                onDownloadStartRequest: (c, req) =>
-                    _download(req.url.toString(), req.suggestedFilename),
+                onDownloadStarting: (c, req) async {
+                  _download(req.url.toString(), req.suggestedFilename);
+                  return null;
+                },
                 onPermissionRequest: (c, req) async {
                   if (req.resources.contains(PermissionResourceType.CAMERA)) {
                     await Permission.camera.request();
