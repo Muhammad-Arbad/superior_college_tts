@@ -26,7 +26,8 @@ android {
 
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
-        applicationId = "com.superiortts.portal"
+        // Same ID as the existing Play listing, so this ships as an update
+        applicationId = "com.schoolspk.supptts"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 24
