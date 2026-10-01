@@ -1,4 +1,4 @@
-package com.example.superior_college_tts
+package com.superiortts.portal
 
 import io.flutter.embedding.android.FlutterActivity
 
