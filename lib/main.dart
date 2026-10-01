@@ -184,6 +184,10 @@ class _PortalPageState extends State<PortalPage> {
     _web?.loadUrl(urlRequest: URLRequest(url: WebUri(url)));
   }
 
+  // Drawer, menu and bottom nav only after login (student panel pages)
+  bool get _inPanel =>
+      (Uri.tryParse(_currentUrl)?.path ?? '').contains('/student-panel/');
+
   // Bottom tab matching the current page (-1 = none)
   int get _bottomIndex {
     final path = Uri.tryParse(_currentUrl)?.path ?? '';
@@ -240,39 +244,43 @@ class _PortalPageState extends State<PortalPage> {
             appBar: AppBar(
               backgroundColor: kBrand,
               foregroundColor: Colors.white,
+              automaticallyImplyLeading: _inPanel,
               title: const Text(
                 'Superior College T.T.S',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
               actions: [
-                PopupMenuButton<String>(
-                  color: kDrawerBg,
-                  onSelected: (v) {
-                    if (v == 'exit') {
-                      SystemNavigator.pop();
-                    } else {
-                      _open(v);
-                    }
-                  },
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: kProfileUrl,
-                      child: _MenuText('My Profile'),
-                    ),
-                    PopupMenuItem(
-                      value: kPasswordUrl,
-                      child: _MenuText('Change Password'),
-                    ),
-                    PopupMenuItem(value: 'exit', child: _MenuText('Exit')),
-                  ],
-                ),
+                if (_inPanel)
+                  PopupMenuButton<String>(
+                    color: kDrawerBg,
+                    onSelected: (v) {
+                      if (v == 'exit') {
+                        SystemNavigator.pop();
+                      } else {
+                        _open(v);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: kProfileUrl,
+                        child: _MenuText('My Profile'),
+                      ),
+                      PopupMenuItem(
+                        value: kPasswordUrl,
+                        child: _MenuText('Change Password'),
+                      ),
+                      PopupMenuItem(value: 'exit', child: _MenuText('Exit')),
+                    ],
+                  ),
               ],
             ),
-            drawer: _AppDrawer(onTap: _open),
-            bottomNavigationBar: _BottomBar(
-              selected: _bottomIndex,
-              onTap: (i) => _open(kBottomItems[i].url),
-            ),
+            drawer: _inPanel ? _AppDrawer(onTap: _open) : null,
+            bottomNavigationBar: !_inPanel
+                ? null
+                : _BottomBar(
+                    selected: _bottomIndex,
+                    onTap: (i) => _open(kBottomItems[i].url),
+                  ),
             body: Stack(
               children: [
                 InAppWebView(
